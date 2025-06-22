@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Video Trimmer</title>
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+
+<h1>Upload & Trim Video</h1>
+
+<form id="upload-form">
+  <label for="video-file">Choose video file to upload:</label>
+  <input type="file" id="video-file" accept="video/*" required />
+  <button type="submit">Upload & Play</button>
+</form>
+
+<video id="video-player" controls style="display:none;"></video>
+
+<div class="slider-container" style="display:none;" id="trim-controls">
+  <label>Trim Start (seconds): <span id="start-time-label">0</span></label>
+  <input type="range" id="start-time" min="0" step="0.1" value="0" />
+  
+  <label>Trim End (seconds): <span id="end-time-label">0</span></label>
+  <input type="range" id="end-time" min="0" step="0.1" value="0" />
+  
+  <button id="trim-button" disabled>Trim Video</button>
+</div>
+
+<div id="message"></div>
+
+<div id="trimmed-video"></div>
+
+<script>
+  const uploadForm = document.getElementById('upload-form');
+  const videoFileInput = document.getElementById('video-file');
+  const videoPlayer = document.getElementById('video-player');
+  const trimControls = document.getElementById('trim-controls');
+  const startTimeInput = document.getElementById('start-time');
+  const endTimeInput = document.getElementById('end-time');
+  const startTimeLabel = document.getElementById('start-time-label');
+  const endTimeLabel = document.getElementById('end-time-label');
+  const trimButton = document.getElementById('trim-button');
+  const messageDiv = document.getElementById('message');
+  const trimmedVideoDiv = document.getElementById('trimmed-video');
+
+  let uploadedFilename = '';
+
+  uploadForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    messageDiv.textContent = 'Uploading...';
+    trimmedVideoDiv.innerHTML = '';
+    trimButton.disabled = true;
+    trimControls.style.display = 'none';
+    videoPlayer.style.display = 'none';
+
+    const file = videoFileInput.files[0];
+    if (!file) {
+      messageDiv.textContent = 'Please select a video file first.';
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch('/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const result = await response.json();
+
+      if (result.info) {
+        messageDiv.textContent = 'Upload successful! Loading video...';
+        uploadedFilename = file.name;
+
+        const videoUrl = `/videos/${encodeURIComponent(uploadedFilename)}`;
+        videoPlayer.src = videoUrl;
+        videoPlayer.style.display = 'block';
+
+        // Wait for metadata to load to get duration
+        videoPlayer.onloadedmetadata = () => {
+          startTimeInput.max = videoPlayer.duration.toFixed(2);
+          endTimeInput.max = videoPlayer.duration.toFixed(2);
+          startTimeInput.value = 0;
+          endTimeInput.value = videoPlayer.duration.toFixed(2);
+          startTimeLabel.textContent = '0';
+          endTimeLabel.textContent = videoPlayer.duration.toFixed(2);
+          trimControls.style.display = 'block';
+          trimButton.disabled = false;
+          messageDiv.textContent = 'Adjust the trim sliders and click "Trim Video".';
+        };
+      } else {
+        messageDiv.textContent = 'Upload failed.';
+      }
+    } catch (err) {
+      console.error(err);
+      messageDiv.textContent = 'Error uploading file.';
+    }
+  });
+
+  startTimeInput.addEventListener('input', () => {
+    let start = parseFloat(startTimeInput.value);
+    let end = parseFloat(endTimeInput.value);
+    if (start >= end) {
+      start = end - 0.1;
+      if (start < 0) start = 0;
+      startTimeInput.value = start.toFixed(2);
+    }
+    startTimeLabel.textContent = start.toFixed(2);
+  });
+
+  endTimeInput.addEventListener('input', () => {
+    let start = parseFloat(startTimeInput.value);
+    let end = parseFloat(endTimeInput.value);
+    if (end <= start) {
+      end = start + 0.1;
+      if (end > videoPlayer.duration) end = videoPlayer.duration;
+      endTimeInput.value = end.toFixed(2);
+    }
+    endTimeLabel.textContent = end.toFixed(2);
+  });
+
+  trimButton.addEventListener('click', async () => {
+    messageDiv.textContent = 'Trimming video... This may take a while.';
+    trimButton.disabled = true;
+    trimmedVideoDiv.innerHTML = '';
+
+    const params = new URLSearchParams({
+      filename: uploadedFilename,
+      start: startTimeInput.value,
+      end: endTimeInput.value
+    });
+
+    try {
+      const response = await fetch(`/edit/trim?${params.toString()}`, {
+        method: 'POST'
+      });
+      const data = await response.json();
+
+      if (data.trimmed_video) {
+        messageDiv.textContent = 'Trim completed! See below.';
+        trimmedVideoDiv.innerHTML = `
+          <h3>Trimmed Video:</h3>
+          <video src="${data.trimmed_video}" controls autoplay style="width:100%; max-width:640px;"></video>
+          <p><a href="${data.trimmed_video}" target="_blank" download>Download trimmed video</a></p>
+        `;
+      } else if (data.error) {
+        messageDiv.textContent = `Error: ${data.error}`;
+      } else {
+        messageDiv.textContent = 'Unknown error occurred.';
+      }
+    } catch (err) {
+      console.error(err);
+      messageDiv.textContent = 'Error during trimming.';
+    } finally {
+      trimButton.disabled = false;
+    }
+  });
+</script>
+
+</body>
+</html>
